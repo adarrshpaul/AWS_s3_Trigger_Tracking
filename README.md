@@ -27,3 +27,13 @@ None
 - `MyLambdaLogGroupName`: The name of the CloudWatch Logs group created by the CloudFormation stack for the Lambda function.
 - `MySnsTopicArn`: The ARN of the SNS topic created by the CloudFormation stack.
 - `MyLambdaErrorAlarmArn`: The ARN of the CloudWatch alarm created by the CloudFormation stack.
+
+## License
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Contributing
+1. Fork the repository
+2. Create a new branch
+3. Make your changes and commit them
+4. Push your changes to your forked repository
+5. Submit a pull request
