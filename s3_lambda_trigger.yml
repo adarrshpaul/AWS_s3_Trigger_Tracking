@@ -1,0 +1,148 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+
+Resources:
+  MyS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: pdf
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: 's3:ObjectCreated:*'
+            Function: !GetAtt MyLambdaFunction.Arn
+          - Event: 's3:ObjectRemoved:*'
+            Function: !GetAtt MyLambdaFunction.Arn
+          - Event: 's3:ObjectRestore:*'
+            Function: !GetAtt MyLambdaFunction.Arn
+          - Event: 's3:ObjectUpdate:*'
+            Function: !GetAtt MyLambdaFunction.Arn
+
+  MyLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: my-lambda-function
+      Handler: index.lambda_handler
+      Runtime: python3.8
+      Code:
+        ZipFile: |
+          import json
+          import urllib.parse
+          import boto3
+
+          dynamodb = boto3.resource("dynamodb")
+          table_name = "my-dynamodb-table"
+
+          def lambda_handler(event, context):
+              s3 = boto3.client("s3")
+              table = dynamodb.Table(table_name)
+
+              # Get the S3 bucket and object key from the event
+              bucket_name = event['Records'][0]['s3']['bucket']['name']
+              object_key = urllib.parse.unquote_plus(event['Records'][0]['s3']['object']['key'], encoding='utf-8')
+
+              # Check if the event is a create, delete, restore, or update event
+              if event['Records'][0]['eventName'].startswith('ObjectCreated'):
+                  # Handle object creation event
+                  print(f"New file uploaded to S3: {object_key}")
+                  table.put_item(
+                      Item={
+                          "object_key": object_key,
+                          "event_type": "upload",
+                          "timestamp": event['Records'][0]['eventTime']
+                      }
+                  )
+              elif event['Records'][0]['eventName'].startswith('ObjectRemoved'):
+                  # Handle object deletion event
+                  print(f"File deleted from S3: {object_key}")
+                  table.put_item(
+                      Item={
+                          "object_key": object_key,
+                          "event_type": "delete",
+                          "timestamp": event['Records'][0]['eventTime']
+                      }
+                  )
+              elif event['Records'][0]['eventName'].startswith('ObjectRestore'):
+                  # Handle object restore event
+                  print(f"File restored in S3: {object_key}")
+                  table.put_item(
+                      Item={
+                          "object_key": object_key,
+                          "event_type": "restore",
+                          "timestamp": event['Records'][0]['eventTime']
+                      }
+                  )
+              elif event['Records'][0]['eventName'].startswith('ObjectUpdate'):
+                  # Handle object update event
+                  print(f"File updated in S3: {object_key}")
+                  table.put_item(
+                      Item={
+                          "object_key": object_key,
+                          "event_type": "update",
+                          "timestamp": event['Records'][0]['eventTime']
+                      }
+                  )
+
+      Role: !GetAtt MyLambdaExecutionRole.Arn
+      Timeout: 30
+      MemorySize: 128
+      Environment:
+        Variables:
+          LOG_LEVEL: INFO
+
+  MyLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: my-lambda-execution-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: my-lambda-policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                Resource: "*"
+
+  MyLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/my-lambda-function
+      RetentionInDays: 30
+
+  MyLambdaMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      FilterPattern: "{ $.level = \"ERROR\" }"
+      LogGroupName: !Ref MyLambdaLogGroup
+      MetricTransformations:
+        - MetricName: MyLambdaErrors
+          MetricNamespace: "MyLambda"
+          MetricValue: "1"
+
+  MySnsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: SNS Topic
+      TopicName: my-sns-topic
+
+  MyLambdaErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: my-lambda-error-alarm
+      AlarmActions:
+        - !Ref MySnsTopic
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 1
+      MetricName: MyLambdaErrors
+      Namespace: MyLambda
+      Period: 300
